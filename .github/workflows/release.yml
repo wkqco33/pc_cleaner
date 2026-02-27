@@ -1,0 +1,59 @@
+name: release
+
+on:
+    workflow_dispatch:
+        inputs:
+            version:
+                description: "Version tag (e.g., v1.0.0)"
+                required: true
+                type: string
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write # Needed for creating releases and pushing tags
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version-file: go.mod
+                  cache: false
+
+            - name: Cache Go build and modules
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      ~/go/pkg/mod
+                      ~/.cache/go-build
+                  key: ${{ runner.os }}-go-linux-amd64-${{ hashFiles('**/go.sum') }}
+                  restore-keys: |
+                      ${{ runner.os }}-go-linux-amd64-
+                      ${{ runner.os }}-go-
+
+            - name: Build Linux amd64
+              env:
+                  GOOS: linux
+                  GOARCH: amd64
+                  VERSION: ${{ inputs.version }}
+              run: |
+                  CLEAN_VERSION=${VERSION#v}
+                  go build -ldflags "-X main.version=${CLEAN_VERSION}" -o pc_cleaner .
+
+            - name: Commit binary and tag
+              run: |
+                  git config --global user.name "github-actions[bot]"
+                  git config --global user.email "github-actions[bot]@users.noreply.github.com"
+                  git add --force pc_cleaner
+                  git commit -m "chore: include linux/amd64 binary for ppm release ${{ inputs.version }}"
+                  git tag ${{ inputs.version }}
+                  git push origin ${{ inputs.version }}
+
+            - name: Create GitHub Release
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  gh release create ${{ inputs.version }} --title "Release ${{ inputs.version }}" --generate-notes
