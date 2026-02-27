@@ -83,6 +83,25 @@ GOOS=windows GOARCH=amd64 go build -o bin/pc_cleaner_windows_amd64.exe .
 GOOS=darwin  GOARCH=arm64 go build -o bin/pc_cleaner_darwin_arm64 .
 ```
 
+## GitHub Actions 아티팩트 설치 (macOS/Linux)
+
+GitHub Actions 빌드 아티팩트에서 최신 바이너리를 내려받아 전역 설치합니다.
+
+요구 사항:
+
+- GitHub CLI (`gh`) 설치 및 로그인
+
+```bash
+./scripts/install_from_artifact.sh
+```
+
+옵션 환경변수:
+
+- `REPO` (기본: `seomini/pc_cleaner`)
+- `WORKFLOW` (기본: `build.yml`)
+- `RUN_ID` (특정 런 ID 지정)
+- `INSTALL_DIR` (기본: `/usr/local/bin`)
+
 ## 라이센스
 
 [MIT License](./LICENSE)
