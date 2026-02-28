@@ -23,37 +23,29 @@ jobs:
                   go-version-file: go.mod
                   cache: false
 
-            - name: Cache Go build and modules
-              uses: actions/cache@v4
-              with:
-                  path: |
-                      ~/go/pkg/mod
-                      ~/.cache/go-build
-                  key: ${{ runner.os }}-go-linux-amd64-${{ hashFiles('**/go.sum') }}
-                  restore-keys: |
-                      ${{ runner.os }}-go-linux-amd64-
-                      ${{ runner.os }}-go-
-
-            - name: Build Linux amd64
+            - name: Build Binaries
               env:
-                  GOOS: linux
-                  GOARCH: amd64
                   VERSION: ${{ inputs.version }}
               run: |
                   CLEAN_VERSION=${VERSION#v}
-                  go build -ldflags "-X main.version=${CLEAN_VERSION}" -o pc_cleaner .
-
-            - name: Commit binary and tag
-              run: |
-                  git config --global user.name "github-actions[bot]"
-                  git config --global user.email "github-actions[bot]@users.noreply.github.com"
-                  git add --force pc_cleaner
-                  git commit -m "chore: include linux/amd64 binary for ppm release ${{ inputs.version }}"
-                  git tag ${{ inputs.version }}
-                  git push origin ${{ inputs.version }}
+                  BINARY="pc_cleaner"
+                  LDFLAGS="-X main.version=${CLEAN_VERSION}"
+                  
+                  mkdir -p dist
+                  # Linux
+                  GOOS=linux GOARCH=amd64   go build -ldflags "$LDFLAGS" -o dist/${BINARY}_linux_amd64 .
+                  GOOS=linux GOARCH=arm64   go build -ldflags "$LDFLAGS" -o dist/${BINARY}_linux_arm64 .
+                  # macOS
+                  GOOS=darwin GOARCH=amd64  go build -ldflags "$LDFLAGS" -o dist/${BINARY}_darwin_amd64 .
+                  GOOS=darwin GOARCH=arm64  go build -ldflags "$LDFLAGS" -o dist/${BINARY}_darwin_arm64 .
+                  # Windows
+                  GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/${BINARY}_windows_amd64.exe .
 
             - name: Create GitHub Release
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  gh release create ${{ inputs.version }} --title "Release ${{ inputs.version }}" --generate-notes
+                  gh release create ${{ inputs.version }} \
+                    --title "Release ${{ inputs.version }}" \
+                    --generate-notes \
+                    dist/*
