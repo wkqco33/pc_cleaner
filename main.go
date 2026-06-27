@@ -45,21 +45,43 @@ func main() {
 	// 정리 대상만 추출
 	cleanable := filterCleanable(results)
 	if len(cleanable) == 0 {
+		diskInfo, err := scanner.GetDiskUsage("")
+		if err == nil {
+			fmt.Printf("  디스크 공간: 전체 %s | 사용 가능 %s\n\n",
+				ui.FormatBytes(int64(diskInfo.Total)),
+				ui.Green(ui.FormatBytes(int64(diskInfo.Available))),
+			)
+		}
 		ui.PrintOK("정리할 항목이 없습니다.")
 		return
 	}
 
 	totalSize := totalScanSize(cleanable)
+	diskInfo, err := scanner.GetDiskUsage("")
 
 	fmt.Println()
 	if *dryRun {
+		if err == nil {
+			fmt.Printf("  디스크 공간: 전체 %s | 사용 가능 %s (정리 후 예상: %s)\n",
+				ui.FormatBytes(int64(diskInfo.Total)),
+				ui.Green(ui.FormatBytes(int64(diskInfo.Available))),
+				ui.Bold(ui.Green(ui.FormatBytes(int64(diskInfo.Available+uint64(totalSize))))),
+			)
+		}
 		ui.PrintWarn(fmt.Sprintf("[DRY-RUN] 정리 가능 용량: %s", ui.Bold(ui.Yellow(ui.FormatBytes(totalSize)))))
 		cleaner.Clean(cleanable, true)
 		return
 	}
 
 	// 사용자 확인
-	fmt.Printf("\n  %s\n",
+	if err == nil {
+		fmt.Printf("  디스크 공간: 전체 %s | 사용 가능 %s (정리 후 예상: %s)\n",
+			ui.FormatBytes(int64(diskInfo.Total)),
+			ui.Green(ui.FormatBytes(int64(diskInfo.Available))),
+			ui.Bold(ui.Green(ui.FormatBytes(int64(diskInfo.Available+uint64(totalSize))))),
+		)
+	}
+	fmt.Printf("  %s\n",
 		ui.Bold(fmt.Sprintf("정리 가능 용량: %s", ui.Yellow(ui.FormatBytes(totalSize)))),
 	)
 	fmt.Printf("  삭제를 진행하시겠습니까? %s ", ui.Gray("[y/N]"))

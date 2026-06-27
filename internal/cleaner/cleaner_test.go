@@ -75,8 +75,8 @@ func TestClean_SkipNotExist(t *testing.T) {
 func TestClean_Command(t *testing.T) {
 	sr := scanner.ScanResult{
 		Item: scanner.CacheItem{
-			Name:    "echo 명령",
-			Command: []string{"echo", "pc_cleaner_test"},
+			Name:    "whoami 명령",
+			Command: []string{"whoami"},
 			Type:    scanner.TypeCommand,
 		},
 		Size:   -1,
