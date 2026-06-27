@@ -78,11 +78,11 @@ jobs:
           VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
         run: |
           mkdir -p dist
-          go build -ldflags "-X main.version=${VERSION}" -o "dist/pc_cleaner_${GOOS}_${GOARCH}${{ matrix.ext }}" .
+          go build -ldflags "-X main.version=${VERSION}" -o "dist/pcc_${GOOS}_${GOARCH}${{ matrix.ext }}" .
 
       - name: Upload artifact
         if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
-          name: pc_cleaner_${{ matrix.os }}_${{ matrix.arch }}
-          path: dist/pc_cleaner_${{ matrix.os }}_${{ matrix.arch }}${{ matrix.ext }}
+          name: pcc_${{ matrix.os }}_${{ matrix.arch }}
+          path: dist/pcc_${{ matrix.os }}_${{ matrix.arch }}${{ matrix.ext }}

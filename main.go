@@ -23,7 +23,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("pc_cleaner v%s\n", version)
+		fmt.Printf("pcc v%s\n", version)
 		return
 	}
 
@@ -105,11 +105,12 @@ func filterItems(items []scanner.CacheItem, skipStr string) []scanner.CacheItem 
 	return filtered
 }
 
-// filterCleanable returns only results that exist and have no errors.
+// filterCleanable returns only results that exist, have no errors, and are not
+// blocked by missing privileges.
 func filterCleanable(results []scanner.ScanResult) []scanner.ScanResult {
 	var out []scanner.ScanResult
 	for _, r := range results {
-		if r.Exists && r.Error == nil {
+		if r.Exists && r.Error == nil && !r.NeedsAdmin {
 			out = append(out, r)
 		}
 	}
@@ -163,6 +164,8 @@ func printRow(r scanner.ScanResult) {
 		fmt.Printf("%s %s\n", name, ui.Gray("없음"))
 	case r.Error != nil:
 		fmt.Printf("%s %s\n", name, ui.Red("오류"))
+	case r.NeedsAdmin:
+		fmt.Printf("%s %s\n", name, ui.Yellow("권한 필요 (관리자)"))
 	case r.Item.Type == scanner.TypeCommand:
 		fmt.Printf("%s %s\n", name, ui.Yellow("명령 실행"))
 	case r.Size == 0:

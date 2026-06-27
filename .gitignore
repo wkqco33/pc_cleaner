@@ -1,7 +1,7 @@
 # 빌드 산출물
 bin/
-pc_cleaner
-pc_cleaner.exe
+pcc
+pcc.exe
 
 # Created by https://www.toptal.com/developers/gitignore/api/go,visualstudiocode,linux,macos,windows
 

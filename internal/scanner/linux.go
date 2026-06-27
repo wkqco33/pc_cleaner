@@ -7,17 +7,12 @@ import (
 
 func linuxItems() []CacheItem {
 	home, _ := os.UserHomeDir()
+	cache := filepath.Join(home, ".cache")
 
 	return []CacheItem{
 		{
 			Name:     "Thumbnail 캐시",
-			Path:     filepath.Join(home, ".cache", "thumbnails"),
-			Type:     TypeDir,
-			Category: "시스템",
-		},
-		{
-			Name:     "사용자 캐시 (~/.cache)",
-			Path:     filepath.Join(home, ".cache"),
+			Path:     filepath.Join(cache, "thumbnails"),
 			Type:     TypeDir,
 			Category: "시스템",
 		},
@@ -27,17 +22,24 @@ func linuxItems() []CacheItem {
 			Type:     TypeCommand,
 			Category: "시스템",
 		},
+		// --- 브라우저 (프로필별 캐시) ---
 		{
-			Name:     "/tmp 임시 파일",
-			Path:     "/tmp",
-			Type:     TypeDir,
-			Category: "시스템",
+			Name:     "Chrome 캐시",
+			Path:     filepath.Join(cache, "google-chrome", "*", "Cache"),
+			Type:     TypeGlob,
+			Category: "브라우저",
 		},
 		{
-			Name:     "/var/tmp 임시 파일",
-			Path:     "/var/tmp",
-			Type:     TypeDir,
-			Category: "시스템",
+			Name:     "Chromium 캐시",
+			Path:     filepath.Join(cache, "chromium", "*", "Cache"),
+			Type:     TypeGlob,
+			Category: "브라우저",
+		},
+		{
+			Name:     "Firefox 캐시",
+			Path:     filepath.Join(cache, "mozilla", "firefox", "*", "cache2"),
+			Type:     TypeGlob,
+			Category: "브라우저",
 		},
 	}
 }

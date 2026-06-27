@@ -28,7 +28,7 @@ jobs:
                   VERSION: ${{ inputs.version }}
               run: |
                   CLEAN_VERSION=${VERSION#v}
-                  BINARY="pc_cleaner"
+                  BINARY="pcc"
                   LDFLAGS="-X main.version=${CLEAN_VERSION}"
                   
                   mkdir -p dist

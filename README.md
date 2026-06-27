@@ -13,23 +13,23 @@ Mac / Windows / Linux에서 캐시 및 임시 파일을 정리해 디스크 공�
 ```bash
 git clone https://github.com/seomini/pc_cleaner
 cd pc_cleaner
-go build -o pc_cleaner .
+go build -o pcc .
 ```
 
 ## 사용법
 
 ```bash
 # 분석만 실행 (삭제 없음)
-./pc_cleaner --dry-run
+./pcc --dry-run
 
 # 실행 (스캔 후 확인 요청)
-./pc_cleaner
+./pcc
 
 # 특정 항목 제외
-./pc_cleaner --skip=gradle,docker
+./pcc --skip=gradle,docker
 
 # 버전 확인
-./pc_cleaner --version
+./pcc --version
 ```
 
 ## 정리 대상
@@ -78,9 +78,9 @@ go build -o pc_cleaner .
 ## 크로스컴파일
 
 ```bash
-GOOS=linux  GOARCH=amd64 go build -o bin/pc_cleaner_linux_amd64 .
-GOOS=windows GOARCH=amd64 go build -o bin/pc_cleaner_windows_amd64.exe .
-GOOS=darwin  GOARCH=arm64 go build -o bin/pc_cleaner_darwin_arm64 .
+GOOS=linux  GOARCH=amd64 go build -o bin/pcc_linux_amd64 .
+GOOS=windows GOARCH=amd64 go build -o bin/pcc_windows_amd64.exe .
+GOOS=darwin  GOARCH=arm64 go build -o bin/pcc_darwin_arm64 .
 ```
 
 ## GitHub Actions 아티팩트 설치 (macOS/Linux)

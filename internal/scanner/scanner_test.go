@@ -3,6 +3,7 @@ package scanner_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/seomini/pc_cleaner/internal/scanner"
@@ -106,6 +107,66 @@ func TestGetItems_NotEmpty(t *testing.T) {
 	items := scanner.GetItems()
 	if len(items) == 0 {
 		t.Error("GetItems는 최소 1개 이상의 항목을 반환해야 합니다")
+	}
+}
+
+// TestGetItems_NoNestedDirs: 반환된 디렉토리 항목 중 다른 항목의
+// 하위 경로인 것이 없어야 함 (중복 집계/삭제 방지)
+func TestGetItems_NoNestedDirs(t *testing.T) {
+	items := scanner.GetItems()
+	for _, a := range items {
+		if a.Type != scanner.TypeDir || a.Path == "" {
+			continue
+		}
+		for _, b := range items {
+			if b.Type != scanner.TypeDir || b.Path == "" || a.Path == b.Path {
+				continue
+			}
+			prefix := filepath.Clean(b.Path) + string(filepath.Separator)
+			if strings.HasPrefix(filepath.Clean(a.Path), prefix) {
+				t.Errorf("중첩 경로가 dedup되지 않음: %q ⊂ %q", a.Path, b.Path)
+			}
+		}
+	}
+}
+
+// TestScanItem_Glob: 와일드카드 경로가 매칭된 디렉토리들의 용량을 합산해야 함
+func TestScanItem_Glob(t *testing.T) {
+	base := t.TempDir()
+	// base/p1/Cache, base/p2/Cache 두 프로필 캐시 생성
+	for _, p := range []string{"p1", "p2"} {
+		dir := filepath.Join(base, p, "Cache")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(dir, "data"), 1000)
+	}
+
+	item := scanner.CacheItem{
+		Name: "glob",
+		Path: filepath.Join(base, "*", "Cache"),
+		Type: scanner.TypeGlob,
+	}
+	r := scanner.Scan([]scanner.CacheItem{item})[0]
+
+	if !r.Exists {
+		t.Error("매칭이 있으면 Exists=true 여야 합니다")
+	}
+	if r.Size != 2000 {
+		t.Errorf("glob 용량 합산 불일치: 기대 2000, 실제 %d", r.Size)
+	}
+}
+
+// TestScanItem_GlobNoMatch: 매칭이 없으면 Exists=false
+func TestScanItem_GlobNoMatch(t *testing.T) {
+	item := scanner.CacheItem{
+		Name: "glob",
+		Path: filepath.Join(t.TempDir(), "*", "Cache"),
+		Type: scanner.TypeGlob,
+	}
+	r := scanner.Scan([]scanner.CacheItem{item})[0]
+	if r.Exists {
+		t.Error("매칭이 없으면 Exists=false 여야 합니다")
 	}
 }
 
