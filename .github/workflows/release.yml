@@ -29,6 +29,8 @@ jobs:
           total=$(go tool cover -func=/tmp/core.out | awk '/^total:/ {print $3}' | tr -d '%')
           echo "Core package coverage: ${total}%"
           if awk "BEGIN {exit (${total} < 70.0)}"; then
+            echo "✓ Core coverage OK: ${total}%"
+          else
             echo "::error::Core coverage below 70% threshold (got ${total}%)"
             exit 1
           fi
