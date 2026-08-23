@@ -3,7 +3,7 @@ package ui_test
 import (
 	"testing"
 
-	"github.com/seomini/pc_cleaner/internal/ui"
+	"github.com/wkqco33/pc_cleaner/internal/ui"
 )
 
 func TestFormatBytes(t *testing.T) {

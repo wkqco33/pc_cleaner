@@ -1,9 +1,9 @@
-version: '3'
+version: "3"
 
 vars:
   BINARY: pcc
   VERSION: 0.1.0
-  MODULE: github.com/seomini/pc_cleaner
+  MODULE: github.com/wkqco33/pc_cleaner
   LDFLAGS: '-ldflags "-X main.version={{.VERSION}}"'
   INSTALL_DIR: /usr/local/bin
 
@@ -50,6 +50,23 @@ tasks:
     desc: 유닛 테스트 실행
     cmds:
       - go test ./... -v
+
+  # ── 커버리지 ──────────────────────────────────────────────────
+  coverage:
+    desc: 테스트 커버리지 리포트 (핵심 패키지 70%% 이상 게이트)
+    cmds:
+      - go test ./internal/scanner ./internal/cleaner -coverprofile=/tmp/pcc_core.out
+      - go tool cover -func=/tmp/pcc_core.out | grep '^total:'
+      - |
+        total=$(go tool cover -func=/tmp/pcc_core.out | awk '/^total:/{print $3}' | tr -d '%')
+        echo "핵심 패키지 커버리지: ${total}%"
+        if awk -v t="$total" 'BEGIN { exit (t < 70.0) }'; then
+          echo "✓ 핵심 패키지 커버리지 OK (>= 70%)"
+        else
+          echo "✗ 커버리지 70%% 미만"
+          exit 1
+        fi
+      - rm -f /tmp/pcc_core.out
 
   # ── 설치 (/usr/local/bin, Unix 전용) ──────────────────────────
   install:

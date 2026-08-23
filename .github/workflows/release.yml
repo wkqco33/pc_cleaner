@@ -1,51 +1,99 @@
 name: release
 
 on:
-    workflow_dispatch:
-        inputs:
-            version:
-                description: "Version tag (e.g., v1.0.0)"
-                required: true
-                type: string
+  push:
+    tags:
+      - "v*"
 
 jobs:
-    release:
-        runs-on: ubuntu-latest
-        permissions:
-            contents: write # Needed for creating releases and pushing tags
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v4
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-            - name: Setup Go
-              uses: actions/setup-go@v5
-              with:
-                  go-version-file: go.mod
-                  cache: false
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
 
-            - name: Build Binaries
-              env:
-                  VERSION: ${{ inputs.version }}
-              run: |
-                  CLEAN_VERSION=${VERSION#v}
-                  BINARY="pcc"
-                  LDFLAGS="-X main.version=${CLEAN_VERSION}"
-                  
-                  mkdir -p dist
-                  # Linux
-                  GOOS=linux GOARCH=amd64   go build -ldflags "$LDFLAGS" -o dist/${BINARY}_linux_amd64 .
-                  GOOS=linux GOARCH=arm64   go build -ldflags "$LDFLAGS" -o dist/${BINARY}_linux_arm64 .
-                  # macOS
-                  GOOS=darwin GOARCH=amd64  go build -ldflags "$LDFLAGS" -o dist/${BINARY}_darwin_amd64 .
-                  GOOS=darwin GOARCH=arm64  go build -ldflags "$LDFLAGS" -o dist/${BINARY}_darwin_arm64 .
-                  # Windows
-                  GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/${BINARY}_windows_amd64.exe .
+      - name: Unit tests
+        run: go test ./... -v
 
-            - name: Create GitHub Release
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  gh release create ${{ inputs.version }} \
-                    --title "Release ${{ inputs.version }}" \
-                    --generate-notes \
-                    dist/*
+      - name: Coverage gate (core packages ≥ 70%)
+        run: |
+          go test ./internal/scanner ./internal/cleaner -coverprofile=/tmp/core.out
+          total=$(go tool cover -func=/tmp/core.out | awk '/^total:/ {print $3}' | tr -d '%')
+          echo "Core package coverage: ${total}%"
+          if awk "BEGIN {exit (${total} < 70.0)}"; then
+            echo "::error::Core coverage below 70% threshold (got ${total}%)"
+            exit 1
+          fi
+
+  release:
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: write # Needed for creating releases and pushing tags
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # PACKAGE_GUIDE.md 를 따릅니다:
+      # - 플랫폼별 아카이브({bin_name}_{os}_{arch}.tar.gz / .zip)
+      # - 아카이브 내 실행파일은 bin_name(pcc)과 정확히 일치
+      # - 각 아카이브마다 SHA-256 체크섬(.sha256) 함께 업로드
+      - name: Build archives + checksums
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          CLEAN_VERSION=${VERSION#v}
+          LDFLAGS="-X main.version=${CLEAN_VERSION}"
+          mkdir -p dist
+
+          build_archive() {
+            local os="$1" arch="$2"
+            local name="pcc_${os}_${arch}"
+            local build_dir="dist/build_${os}_${arch}"
+            mkdir -p "${build_dir}"
+            if [[ "${os}" == "windows" ]]; then
+              GOOS="${os}" GOARCH="${arch}" go build -ldflags "${LDFLAGS}" -o "${build_dir}/pcc.exe" .
+              (cd "${build_dir}" && zip -qr "../${name}.zip" pcc.exe)
+              (cd dist && sha256sum "${name}.zip" > "${name}.zip.sha256")
+            else
+              GOOS="${os}" GOARCH="${arch}" go build -ldflags "${LDFLAGS}" -o "${build_dir}/pcc" .
+              (cd "${build_dir}" && tar -czf "../${name}.tar.gz" pcc)
+              (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
+            fi
+          }
+
+          build_archive linux amd64
+          build_archive linux arm64
+          build_archive darwin amd64
+          build_archive darwin arm64
+          build_archive windows amd64
+
+          echo "=== dist contents ==="
+          ls -la dist
+          echo "=== sha256 files ==="
+          cat dist/*.sha256
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "${TAG}" \
+            --title "Release ${TAG}" \
+            --generate-notes \
+            dist/*.tar.gz dist/*.zip dist/*.sha256

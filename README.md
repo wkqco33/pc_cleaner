@@ -4,6 +4,23 @@ Mac / Windows / Linux에서 캐시 및 임시 파일을 정리해 디스크 공�
 
 ## 설치
 
+### ppm (Private Package Manager, 권장)
+
+[`ppm`](https://github.com/wkqco33/package_manager)이 설치되어 있다면 OS/아키텍처에 맞는 아카이브를 자동으로 내려받아 설치합니다.
+
+```bash
+ppm install wkqco33/pc_cleaner
+# 계획만 확인: ppm install --dry-run wkqco33/pc_cleaner
+```
+
+### go install (권장)
+
+Go가 설치되어 있다면 `go install`로 바로 설치할 수 있습니다.
+
+```bash
+go install github.com/wkqco33/pc_cleaner@latest
+```
+
 ### 바이너리 다운로드
 
 릴리즈 페이지에서 OS에 맞는 바이너리를 다운로드하거나, 직접 빌드합니다.
@@ -11,7 +28,7 @@ Mac / Windows / Linux에서 캐시 및 임시 파일을 정리해 디스크 공�
 ### 직접 빌드
 
 ```bash
-git clone https://github.com/seomini/pc_cleaner
+git clone https://github.com/wkqco33/pc_cleaner
 cd pc_cleaner
 go build -o pcc .
 ```
@@ -82,25 +99,6 @@ GOOS=linux  GOARCH=amd64 go build -o bin/pcc_linux_amd64 .
 GOOS=windows GOARCH=amd64 go build -o bin/pcc_windows_amd64.exe .
 GOOS=darwin  GOARCH=arm64 go build -o bin/pcc_darwin_arm64 .
 ```
-
-## GitHub Actions 아티팩트 설치 (macOS/Linux)
-
-GitHub Actions 빌드 아티팩트에서 최신 바이너리를 내려받아 전역 설치합니다.
-
-요구 사항:
-
-- GitHub CLI (`gh`) 설치 및 로그인
-
-```bash
-./scripts/install_from_artifact.sh
-```
-
-옵션 환경변수:
-
-- `REPO` (기본: `seomini/pc_cleaner`)
-- `WORKFLOW` (기본: `build.yml`)
-- `RUN_ID` (특정 런 ID 지정)
-- `INSTALL_DIR` (기본: `/usr/local/bin`)
 
 ## 라이센스
 

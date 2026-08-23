@@ -2,6 +2,11 @@
 bin/
 pcc
 pcc.exe
+dist/
+
+# Go 커버리지 산출물
+coverage.out
+coverage.html
 
 # Created by https://www.toptal.com/developers/gitignore/api/go,visualstudiocode,linux,macos,windows
 

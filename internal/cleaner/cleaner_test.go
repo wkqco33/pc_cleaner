@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/seomini/pc_cleaner/internal/cleaner"
-	"github.com/seomini/pc_cleaner/internal/scanner"
+	"github.com/wkqco33/pc_cleaner/internal/cleaner"
+	"github.com/wkqco33/pc_cleaner/internal/scanner"
 )
 
 // TestClean_DryRun: dry-run은 실제 파일을 삭제하지 않아야 함

@@ -7,8 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/seomini/pc_cleaner/internal/scanner"
-	"github.com/seomini/pc_cleaner/internal/ui"
+	"github.com/wkqco33/pc_cleaner/internal/scanner"
+	"github.com/wkqco33/wcli/rich"
 )
 
 // Result holds the outcome of cleaning a single item.
@@ -31,7 +31,7 @@ func Clean(results []scanner.ScanResult, dryRun bool) []Result {
 		res := Result{Item: r.Item}
 
 		if dryRun {
-			fmt.Printf("  %s [dry-run] %s\n", ui.Gray("→"), r.Item.Name)
+			rich.Fprintln(os.Stdout, "  [dim]→[/dim] [dry-run] %s", r.Item.Name)
 			res.Success = true
 			res.Freed = r.Size // dry-run은 스캔 추정치를 그대로 표시
 			cleaned = append(cleaned, res)
@@ -50,9 +50,9 @@ func Clean(results []scanner.ScanResult, dryRun bool) []Result {
 		}
 
 		if res.Success {
-			fmt.Printf("  %s %s\n", ui.Green("✓"), r.Item.Name)
+			rich.Fprintln(os.Stdout, "  [green]✓[/green] %s", r.Item.Name)
 		} else {
-			fmt.Printf("  %s %s: %v\n", ui.Red("✗"), r.Item.Name, res.Error)
+			rich.Fprintln(os.Stdout, "  [red]✗[/red] %s: %v", r.Item.Name, res.Error)
 		}
 		cleaned = append(cleaned, res)
 	}

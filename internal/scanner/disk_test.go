@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/seomini/pc_cleaner/internal/scanner"
+	"github.com/wkqco33/pc_cleaner/internal/scanner"
 )
 
 func TestGetDiskUsage(t *testing.T) {

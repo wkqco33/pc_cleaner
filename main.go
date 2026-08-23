@@ -1,107 +1,132 @@
 package main
 
 import (
-	"bufio"
-	"flag"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"sort"
 	"strings"
 
-	"github.com/seomini/pc_cleaner/internal/cleaner"
-	"github.com/seomini/pc_cleaner/internal/scanner"
-	"github.com/seomini/pc_cleaner/internal/ui"
+	"github.com/wkqco33/pc_cleaner/internal/cleaner"
+	"github.com/wkqco33/pc_cleaner/internal/scanner"
+	"github.com/wkqco33/pc_cleaner/internal/ui"
+	"github.com/wkqco33/wcli"
+	"github.com/wkqco33/wcli/rich"
 )
 
 var version = "0.1.0"
 
-func main() {
-	dryRun := flag.Bool("dry-run", false, "실제 삭제 없이 분석만 실행")
-	skipList := flag.String("skip", "", "건너뛸 항목 (쉼표 구분, 예: gradle,pip,docker)")
-	showVersion := flag.Bool("version", false, "버전 출력")
-	flag.Parse()
+// app holds the I/O sinks for the cleaner CLI so it can be exercised with
+// injected writers in tests (mirrors rich/wcli's writer injection).
+type app struct {
+	out io.Writer
+	in  io.Reader
+}
 
-	if *showVersion {
-		fmt.Printf("pcc v%s\n", version)
-		return
+func newApp(out io.Writer, in io.Reader) *app {
+	return &app{out: out, in: in}
+}
+
+func main() {
+	a := newApp(os.Stdout, os.Stdin)
+	if err := a.rootCommand().Execute(os.Args[1:]); err != nil {
+		os.Exit(1)
+	}
+}
+
+// rootCommand builds the wcli command tree. Version auto-registers --version,
+// and NewCompletionCommand adds a shell-completion subcommand.
+func (a *app) rootCommand() *wcli.Command {
+	var dryRun bool
+	var skipList string
+
+	cmd := &wcli.Command{
+		Use:     "pcc",
+		Short:   "불필요한 파일 및 캐시를 정리해 디스크 공간을 확보하는 CLI 도구",
+		Long:    "macOS / Windows / Linux에서 캐시 및 임시 파일을 정리해 디스크 공간을 확보합니다.",
+		Version: version,
+		Run: func(ctx *wcli.Context) error {
+			return a.clean(dryRun, skipList)
+		},
 	}
 
-	ui.PrintHeader(fmt.Sprintf("PC Cleaner v%s — %s", version, runtime.GOOS))
+	cmd.Flags().BoolVar(&dryRun, "dry-run", "", false, "실제 삭제 없이 분석만 실행")
+	cmd.Flags().StringVar(&skipList, "skip", "", "", "건너뛸 항목 (쉼표 구분, 예: gradle,pip,docker)")
 
-	// 스캔 대상 수집
+	cmd.AddCommand(wcli.NewCompletionCommand(cmd))
+	return cmd
+}
+
+// clean runs the full scan → review → confirm → clean pipeline.
+func (a *app) clean(dryRun bool, skipList string) error {
+	rich.Fprintln(a.out, "[bold][cyan]PC Cleaner v%s — %s[/cyan][/bold]", version, runtime.GOOS)
+
 	items := scanner.GetItems()
-	items = filterItems(items, *skipList)
+	items = filterItems(items, skipList)
 
-	ui.PrintInfo(fmt.Sprintf("총 %d개 항목 스캔 중...", len(items)))
-	fmt.Println()
+	rich.Fprintln(a.out, "  [cyan]ℹ[/cyan] 총 %d개 항목 스캔 중...", len(items))
+	fmt.Fprintln(a.out)
 
-	// 병렬 스캔
 	results := scanner.Scan(items)
+	a.printScanTable(results)
 
-	// 결과 출력
-	printTable(results)
-
-	// 정리 대상만 추출
 	cleanable := filterCleanable(results)
 	if len(cleanable) == 0 {
-		diskInfo, err := scanner.GetDiskUsage("")
-		if err == nil {
-			fmt.Printf("  디스크 공간: 전체 %s | 사용 가능 %s\n\n",
-				ui.FormatBytes(int64(diskInfo.Total)),
-				ui.Green(ui.FormatBytes(int64(diskInfo.Available))),
-			)
-		}
-		ui.PrintOK("정리할 항목이 없습니다.")
-		return
+		a.printNoCleanable()
+		return nil
 	}
 
 	totalSize := totalScanSize(cleanable)
-	diskInfo, err := scanner.GetDiskUsage("")
+	diskInfo, diskErr := scanner.GetDiskUsage("")
 
-	fmt.Println()
-	if *dryRun {
-		if err == nil {
-			fmt.Printf("  디스크 공간: 전체 %s | 사용 가능 %s (정리 후 예상: %s)\n",
+	if dryRun {
+		if diskErr == nil {
+			fmt.Fprintf(a.out, "  디스크 공간: 전체 %s | 사용 가능 %s (정리 후 예상: %s)\n",
 				ui.FormatBytes(int64(diskInfo.Total)),
-				ui.Green(ui.FormatBytes(int64(diskInfo.Available))),
-				ui.Bold(ui.Green(ui.FormatBytes(int64(diskInfo.Available+uint64(totalSize))))),
+				ui.FormatBytes(int64(diskInfo.Available)),
+				ui.FormatBytes(int64(diskInfo.Available+uint64(totalSize))),
 			)
 		}
-		ui.PrintWarn(fmt.Sprintf("[DRY-RUN] 정리 가능 용량: %s", ui.Bold(ui.Yellow(ui.FormatBytes(totalSize)))))
+		rich.Fprintln(a.out, "  [yellow]⚠ [DRY-RUN] 정리 가능 용량: [bold]%s[/bold][/yellow]",
+			ui.FormatBytes(totalSize))
 		cleaner.Clean(cleanable, true)
-		return
+		return nil
 	}
 
-	// 사용자 확인
-	if err == nil {
-		fmt.Printf("  디스크 공간: 전체 %s | 사용 가능 %s (정리 후 예상: %s)\n",
+	if diskErr == nil {
+		fmt.Fprintf(a.out, "  디스크 공간: 전체 %s | 사용 가능 %s (정리 후 예상: %s)\n",
 			ui.FormatBytes(int64(diskInfo.Total)),
-			ui.Green(ui.FormatBytes(int64(diskInfo.Available))),
-			ui.Bold(ui.Green(ui.FormatBytes(int64(diskInfo.Available+uint64(totalSize))))),
+			ui.FormatBytes(int64(diskInfo.Available)),
+			ui.FormatBytes(int64(diskInfo.Available+uint64(totalSize))),
 		)
 	}
-	fmt.Printf("  %s\n",
-		ui.Bold(fmt.Sprintf("정리 가능 용량: %s", ui.Yellow(ui.FormatBytes(totalSize)))),
-	)
-	fmt.Printf("  삭제를 진행하시겠습니까? %s ", ui.Gray("[y/N]"))
+	rich.Fprintln(a.out, "  [bold]정리 가능 용량: %s[/bold]", ui.FormatBytes(totalSize))
 
-	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(strings.ToLower(input))
-
-	if input != "y" {
-		fmt.Println()
-		ui.PrintWarn("취소되었습니다.")
-		return
+	ok, err := rich.FConfirm(a.out, a.in, "삭제를 진행하시겠습니까?", false)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Fprintln(a.out)
+		rich.Fprintln(a.out, "  [yellow]⚠ 취소되었습니다.[/yellow]")
+		return nil
 	}
 
-	fmt.Println()
-	ui.PrintHeader("정리 실행 중")
-	cleanResults := cleaner.Clean(cleanable, false)
+	fmt.Fprintln(a.out)
+	cleaner.Clean(cleanable, false)
+	a.printReport(cleaner.Clean(cleanable, false))
+	return nil
+}
 
-	// 결과 리포트
-	printReport(cleanResults)
+func (a *app) printNoCleanable() {
+	if diskInfo, err := scanner.GetDiskUsage(""); err == nil {
+		fmt.Fprintf(a.out, "  디스크 공간: 전체 %s | 사용 가능 %s\n\n",
+			ui.FormatBytes(int64(diskInfo.Total)),
+			ui.FormatBytes(int64(diskInfo.Available)),
+		)
+	}
+	rich.Fprintln(a.out, "  [green]✓[/green] 정리할 항목이 없습니다.")
 }
 
 // filterItems removes items whose name contains any of the skip keywords.
@@ -149,61 +174,76 @@ func totalScanSize(results []scanner.ScanResult) int64 {
 	return total
 }
 
-func printTable(results []scanner.ScanResult) {
-	// 카테고리별 그룹
-	type group struct {
+// scanGroup is a category-bucketed group of scan results (deterministic order).
+type scanGroup struct {
+	category string
+	items    []scanner.ScanResult
+}
+
+// groupScanResults buckets results by category, returning groups sorted by
+// category name (byte order, consistent with Go string sorting).
+func groupScanResults(results []scanner.ScanResult) []scanGroup {
+	type acc struct {
 		category string
 		items    []scanner.ScanResult
 	}
-
-	catMap := map[string]*group{}
-	var catOrder []string
+	order := []string{}
+	byCat := map[string]*acc{}
 	for _, r := range results {
 		cat := r.Item.Category
-		if _, ok := catMap[cat]; !ok {
-			catMap[cat] = &group{category: cat}
-			catOrder = append(catOrder, cat)
+		if _, ok := byCat[cat]; !ok {
+			byCat[cat] = &acc{category: cat}
+			order = append(order, cat)
 		}
-		catMap[cat].items = append(catMap[cat].items, r)
+		byCat[cat].items = append(byCat[cat].items, r)
 	}
-	sort.Strings(catOrder)
+	sort.Strings(order)
 
-	for _, cat := range catOrder {
-		g := catMap[cat]
-		fmt.Printf("  %s\n", ui.Bold(ui.Cyan(g.category)))
-		for _, r := range g.items {
-			printRow(r)
-		}
-		fmt.Println()
+	groups := make([]scanGroup, 0, len(order))
+	for _, cat := range order {
+		groups = append(groups, scanGroup{category: cat, items: byCat[cat].items})
 	}
+	return groups
 }
 
-func printRow(r scanner.ScanResult) {
-	name := fmt.Sprintf("    %-40s", r.Item.Name)
-
+// scanRowStatus returns the human-readable status label for one scan result.
+func scanRowStatus(r scanner.ScanResult) string {
 	switch {
 	case !r.Exists:
-		fmt.Printf("%s %s\n", name, ui.Gray("없음"))
+		return "없음"
 	case r.Error != nil:
-		fmt.Printf("%s %s\n", name, ui.Red("오류"))
+		return "오류"
 	case r.NeedsAdmin:
-		fmt.Printf("%s %s\n", name, ui.Yellow("권한 필요 (관리자)"))
+		return "권한 필요 (관리자)"
 	case r.Item.Type == scanner.TypeCommand:
-		fmt.Printf("%s %s\n", name, ui.Yellow("명령 실행"))
+		return "명령 실행"
 	case r.Size == 0:
-		fmt.Printf("%s %s\n", name, ui.Gray("0 B"))
+		return "0 B"
 	default:
-		fmt.Printf("%s %s\n", name, ui.Yellow(ui.FormatBytes(r.Size)))
+		return ui.FormatBytes(r.Size)
 	}
 }
 
-func printReport(results []cleaner.Result) {
-	fmt.Println()
-	ui.PrintHeader("정리 완료")
+// printScanTable renders the grouped scan results as rich tables.
+func (a *app) printScanTable(results []scanner.ScanResult) {
+	for _, g := range groupScanResults(results) {
+		rich.Fprintln(a.out, "  [bold][cyan]%s[/cyan][/bold]", g.category)
+		t := rich.NewTable("항목", "상태")
+		for _, r := range g.items {
+			t.AddRow(r.Item.Name, scanRowStatus(r))
+		}
+		t.Render(a.out)
+		fmt.Fprintln(a.out)
+	}
+}
+
+// printReport renders a cleanup summary into a.out.
+func (a *app) printReport(results []cleaner.Result) {
+	fmt.Fprintln(a.out)
+	rich.Fprintln(a.out, "[bold][cyan]정리 완료[/cyan][/bold]")
 
 	var totalFreed int64
 	success, failed := 0, 0
-
 	for _, r := range results {
 		if r.Success {
 			success++
@@ -215,9 +255,7 @@ func printReport(results []cleaner.Result) {
 		}
 	}
 
-	fmt.Printf("  성공: %s  실패: %s\n",
-		ui.Green(fmt.Sprintf("%d개", success)),
-		ui.Red(fmt.Sprintf("%d개", failed)),
-	)
-	fmt.Printf("  확보된 용량: %s\n\n", ui.Bold(ui.Green(ui.FormatBytes(totalFreed))))
+	rich.Fprintln(a.out, "  [green]성공: %d개[/green]  [red]실패: %d개[/red]", success, failed)
+	rich.Fprintln(a.out, "  [bold][green]확보된 용량: %s[/green][/bold]", ui.FormatBytes(totalFreed))
+	fmt.Fprintln(a.out)
 }

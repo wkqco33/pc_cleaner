@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/seomini/pc_cleaner/internal/scanner"
+	"github.com/wkqco33/pc_cleaner/internal/scanner"
 )
 
 // TestDirSize: 임시 디렉토리를 만들어 용량 계산이 정확한지 검증
