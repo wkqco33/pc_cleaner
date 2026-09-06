@@ -49,6 +49,29 @@ go build -o pcc .
 ./pcc --version
 ```
 
+## AI 스마트 정리 (`pcc ai`)
+
+LLM(기본값: Ollama)을 활용하여 캐시 항목들의 위험도를 평가하고 최적의 정리 계획을 리포트 및 실행합니다.
+
+```bash
+# 기본 AI 분석 및 스마트 정리 (기본 Ollama llama3.2:latest)
+./pcc ai
+
+# 자연어 지시사항과 함께 실행
+./pcc ai "개발 환경 캐시는 건드리지 말고 브라우저와 시스템 임시 파일만 정리해줘"
+
+# AI 분석만 확인 (삭제 없음)
+./pcc ai --dry-run
+
+# 질문 없이 추천 항목 즉시 정리
+./pcc ai -y
+
+# 커스텀 모델 / 엔드포인트 / 프로바이더 지정
+./pcc ai --model=qwen2.5:7b --endpoint=http://localhost:11434/v1
+./pcc ai --provider=openai --model=gpt-4o-mini
+```
+
+
 ## 정리 대상
 
 ### macOS

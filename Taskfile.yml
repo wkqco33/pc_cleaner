@@ -55,7 +55,7 @@ tasks:
   coverage:
     desc: 테스트 커버리지 리포트 (핵심 패키지 70%% 이상 게이트)
     cmds:
-      - go test ./internal/scanner ./internal/cleaner -coverprofile=/tmp/pcc_core.out
+      - go test ./internal/scanner ./internal/cleaner ./internal/ai -coverprofile=/tmp/pcc_core.out
       - go tool cover -func=/tmp/pcc_core.out | grep '^total:'
       - |
         total=$(go tool cover -func=/tmp/pcc_core.out | awk '/^total:/{print $3}' | tr -d '%')

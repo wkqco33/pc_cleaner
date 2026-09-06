@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/wkqco33/pc_cleaner/internal/ai"
 	"github.com/wkqco33/pc_cleaner/internal/cleaner"
 	"github.com/wkqco33/pc_cleaner/internal/scanner"
 )
@@ -238,6 +240,79 @@ func TestPrintReport_CountsAndFreed(t *testing.T) {
 	}
 	if !strings.Contains(out, "150 B") {
 		t.Errorf("확보 용량 합계(150 B)를 출력해야 합니다: %q", out)
+	}
+}
+
+// --- AI command tests ---
+
+type stubAIAnalyzer struct {
+	result     *ai.AnalysisResult
+	err        error
+	lastPrompt string
+}
+
+func (s *stubAIAnalyzer) Analyze(ctx context.Context, results []scanner.ScanResult, prompt string) (*ai.AnalysisResult, error) {
+	s.lastPrompt = prompt
+	return s.result, s.err
+}
+
+func TestAICommand_DryRun(t *testing.T) {
+	var buf bytes.Buffer
+	a := newApp(&buf, nil)
+	stub := &stubAIAnalyzer{
+		result: &ai.AnalysisResult{
+			Summary: "AI 권장 사항: 불필요한 임시 파일 정리",
+			Recommendations: []ai.ItemRecommendation{
+				{
+					Name:      "Xcode 캐시",
+					Clean:     true,
+					Reason:    "공간 확보 최적",
+					RiskLevel: "안전",
+				},
+			},
+		},
+	}
+	a.aiAnalyzer = stub
+
+	// Execute with --dry-run
+	err := a.rootCommand().Execute([]string{"ai", "--dry-run", "개발 캐시 제외"})
+	if err != nil {
+		t.Fatalf("명령어 실행 실패: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "AI 디스크 분석") {
+		t.Errorf("AI 디스크 분석 헤더가 출력되어야 합니다: %q", out)
+	}
+	if !strings.Contains(out, "AI 권장 사항") {
+		t.Errorf("AI 요약이 출력되어야 합니다: %q", out)
+	}
+	if stub.lastPrompt != "개발 캐시 제외" {
+		t.Errorf("사용자 프롬프트가 전달되어야 합니다: %q", stub.lastPrompt)
+	}
+}
+
+func TestAICommand_NoCleanable(t *testing.T) {
+	var buf bytes.Buffer
+	a := newApp(&buf, nil)
+	stub := &stubAIAnalyzer{
+		result: &ai.AnalysisResult{
+			Summary: "정리할 항목이 없습니다.",
+			Recommendations: []ai.ItemRecommendation{
+				{Name: "Xcode 캐시", Clean: false, Reason: "유지 필요"},
+			},
+		},
+	}
+	a.aiAnalyzer = stub
+
+	err := a.rootCommand().Execute([]string{"ai", "--dry-run"})
+	if err != nil {
+		t.Fatalf("명령어 실행 실패: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "정리할 항목이 없습니다") {
+		t.Errorf("정리 항목 없음 메시지가 출력되어야 합니다: %q", out)
 	}
 }
 
