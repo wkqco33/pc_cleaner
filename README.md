@@ -154,7 +154,7 @@ GOOS=darwin  GOARCH=arm64 go build -o bin/pcc_darwin_arm64 .
 | macOS | amd64, arm64 |
 | Linux | amd64, arm64 |
 | Windows | amd64 |
-| Go | 1.26.1 이상 |
+| Go | 1.26.6 이상 |
 
 ## 라이센스
 

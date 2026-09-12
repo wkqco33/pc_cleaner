@@ -8,7 +8,7 @@
 ## 1. 프로젝트 개요
 
 - **역할**: macOS / Windows / Linux에서 캐시 및 임시 파일을 정리해 디스크 공간을 확보하는 CLI 도구.
-- **언어**: Go (`go 1.26.1`)
+- **언어**: Go (`go 1.26.6`)
 - **CLI 프레임워크**: [`github.com/wkqco33/wcli`](https://github.com/wkqco33/wcli) (v0.2.0) — 명령/플래그/헬프/버전/셀 완성 제공. 터미널 렌더링은 `wcli/rich` 사용.
 - **진입점**: `main.go` (package `main`)
 - **패키지 구조** (코드가 `internal/` 아래에 계층화되어 있음):
