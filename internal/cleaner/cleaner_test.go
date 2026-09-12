@@ -1,8 +1,10 @@
 package cleaner_test
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/wkqco33/pc_cleaner/internal/cleaner"
@@ -10,6 +12,32 @@ import (
 )
 
 // TestClean_DryRun: dry-run은 실제 파일을 삭제하지 않아야 함
+func TestCleanTo_WritesToProvidedWriter(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "keep.txt"), 512)
+	var out bytes.Buffer
+	sr := scanner.ScanResult{
+		Item: scanner.CacheItem{Name: "테스트 출력", Path: dir, Type: scanner.TypeDir},
+		Size: 512, Exists: true,
+	}
+
+	cleaner.CleanTo(&out, []scanner.ScanResult{sr}, true)
+	if !strings.Contains(out.String(), "테스트 출력") {
+		t.Fatalf("주입된 writer에 결과가 기록되어야 합니다: %q", out.String())
+	}
+}
+
+func TestClean_RejectsDangerousPath(t *testing.T) {
+	sr := scanner.ScanResult{
+		Item:   scanner.CacheItem{Name: "위험 경로", Path: string(filepath.Separator), Type: scanner.TypeDir},
+		Exists: true,
+	}
+	results := cleaner.Clean([]scanner.ScanResult{sr}, false)
+	if len(results) != 1 || results[0].Success || results[0].Error == nil {
+		t.Fatalf("위험 경로는 삭제 전에 거부되어야 합니다: %+v", results)
+	}
+}
+
 func TestClean_DryRun(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "keep.txt"), 512)
@@ -72,6 +100,25 @@ func TestClean_SkipNotExist(t *testing.T) {
 }
 
 // TestClean_Command: TypeCommand 항목이 정상 실행되어야 함
+func TestClean_CommandRejectsUnexpectedArguments(t *testing.T) {
+	sr := scanner.ScanResult{Item: scanner.CacheItem{Name: "잘못된 Docker 명령", Command: []string{"docker", "system", "prune", "--volumes"}, Type: scanner.TypeCommand}, Exists: true}
+	results := cleaner.Clean([]scanner.ScanResult{sr}, false)
+	if len(results) != 1 || results[0].Success || results[0].Error == nil {
+		t.Fatalf("예상하지 않은 명령 인자는 실행되면 안 됩니다: %+v", results)
+	}
+}
+
+func TestClean_CommandRejectedWhenNotAllowlisted(t *testing.T) {
+	sr := scanner.ScanResult{
+		Item:   scanner.CacheItem{Name: "위험 명령", Command: []string{"sh", "-c", "echo unsafe"}, Type: scanner.TypeCommand},
+		Exists: true,
+	}
+	results := cleaner.Clean([]scanner.ScanResult{sr}, false)
+	if len(results) != 1 || results[0].Success || results[0].Error == nil {
+		t.Fatalf("허용 목록 밖의 명령은 실행되면 안 됩니다: %+v", results)
+	}
+}
+
 func TestClean_Command(t *testing.T) {
 	sr := scanner.ScanResult{
 		Item: scanner.CacheItem{

@@ -39,14 +39,24 @@ go build -o pcc .
 # 분석만 실행 (삭제 없음)
 ./pcc --dry-run
 
-# 실행 (스캔 후 확인 요청)
+# 실행 (TTY에서 확인 요청)
 ./pcc
+
+# 비대화형 실행: 확인 없이 정리
+./pcc --yes
+
+# 비대화형 환경에서 입력을 금지하고 누락 시 종료 코드 2 반환
+./pcc --no-input
 
 # 특정 항목 제외
 ./pcc --skip=gradle,docker
 
 # 버전 확인
 ./pcc --version
+
+# 스크립트용 JSON 출력
+./pcc --format json --dry-run
+./pcc --format json --yes
 ```
 
 ## AI 스마트 정리 (`pcc ai`)
@@ -70,7 +80,6 @@ LLM(기본값: Ollama)을 활용하여 캐시 항목들의 위험도를 평가�
 ./pcc ai --model=qwen2.5:7b --endpoint=http://localhost:11434/v1
 ./pcc ai --provider=openai --model=gpt-4o-mini
 ```
-
 
 ## 정리 대상
 
@@ -110,10 +119,25 @@ LLM(기본값: Ollama)을 활용하여 캐시 항목들의 위험도를 평가�
 
 ## 안전 정책
 
-- 존재하지 않는 경로는 자동으로 skip
+- 존재하지 않는 경로와 설치되지 않은 명령은 자동으로 skip
 - 디렉토리 자체는 유지하고 **내용만** 삭제
 - 접근 권한이 없는 파일은 skip
+- 루트 디렉터리와 홈 디렉터리 전체 삭제는 거부
 - `--dry-run`으로 삭제 없이 미리 확인 가능
+- 기본 실행은 TTY에서만 확인을 요청하며, 자동화 환경에서는 `--yes`가 필요
+- Docker 정리(`docker system prune -f`)와 journald 정리는 시스템 리소스를 변경하므로 실행 전에 항목을 확인
+
+## 자동화 및 종료 코드
+
+- `--yes`, `--no-input`, `--quiet`, `--no-color`를 지원합니다.
+- `--format plain|json`으로 사람이 읽는 출력과 기계 판독 출력을 선택할 수 있습니다.
+- JSON 모드에서는 삭제 작업에 `--yes`가 필요합니다. `--dry-run`은 확인 없이 실행할 수 있습니다.
+- 결과 데이터는 stdout, 진행 상황·확인·오류 메시지는 stderr로 출력됩니다.
+- `--quiet`는 진행 메시지만 숨기며 결과 출력은 유지합니다.
+- AI 호출은 최대 3회까지 지수 백오프로 재시도하며 오류에 request ID를 포함합니다.
+- 입력이 필요한 비대화형 실행은 종료 코드 `2`를 반환합니다.
+- 기타 실행 오류는 종료 코드 `1`, 성공은 `0`입니다.
+- AI 기능에서 OpenAI를 선택하면 캐시 항목 이름·경로 정보가 설정한 API 엔드포인트로 전송될 수 있습니다.
 
 ## 크로스컴파일
 
@@ -123,6 +147,17 @@ GOOS=windows GOARCH=amd64 go build -o bin/pcc_windows_amd64.exe .
 GOOS=darwin  GOARCH=arm64 go build -o bin/pcc_darwin_arm64 .
 ```
 
+## 지원 범위
+
+| 항목 | 지원 버전 |
+| ---- | ---- |
+| macOS | amd64, arm64 |
+| Linux | amd64, arm64 |
+| Windows | amd64 |
+| Go | 1.26.1 이상 |
+
 ## 라이센스
 
 [MIT License](./LICENSE)
+
+보안 문제는 [SECURITY.md](./SECURITY.md)를 참고해 신고해 주세요.

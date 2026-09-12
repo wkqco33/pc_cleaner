@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	llm "github.com/wkqco33/LLM_client_go"
 	"github.com/wkqco33/pc_cleaner/internal/scanner"
@@ -215,7 +217,29 @@ func TestAnalyze_FallbackOnInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestAnalyze_RetriesTransientErrors(t *testing.T) {
+	oldSleep := retrySleep
+	retrySleep = func(time.Duration) {}
+	t.Cleanup(func() { retrySleep = oldSleep })
+	calls := 0
+	fake := &fakeLLMClient{completeFunc: func(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+		calls++
+		if calls < 2 {
+			return nil, errors.New("connection refused")
+		}
+		return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.Message{Content: `{"summary":"ok","recommendations":[]}`}}}}, nil
+	}}
+	analyzer := NewAnalyzer(fake, "test-model")
+	_, err := analyzer.Analyze(context.Background(), []scanner.ScanResult{{Item: scanner.CacheItem{Name: "캐시"}, Exists: true}}, "")
+	if err != nil || calls != 2 {
+		t.Fatalf("일시적 오류는 재시도되어야 합니다: calls=%d err=%v", calls, err)
+	}
+}
+
 func TestAnalyze_LLMError(t *testing.T) {
+	oldSleep := retrySleep
+	retrySleep = func(time.Duration) {}
+	t.Cleanup(func() { retrySleep = oldSleep })
 	fake := &fakeLLMClient{
 		completeFunc: func(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 			return nil, errors.New("connection refused")
@@ -230,6 +254,9 @@ func TestAnalyze_LLMError(t *testing.T) {
 	_, err := analyzer.Analyze(context.Background(), scanResults, "")
 	if err == nil {
 		t.Fatal("LLM 호출 에러 시 에러를 반환해야 합니다")
+	}
+	if !strings.Contains(err.Error(), "request_id=") {
+		t.Errorf("오류에 request ID가 포함되어야 합니다: %v", err)
 	}
 }
 

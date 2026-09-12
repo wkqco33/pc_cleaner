@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +21,8 @@ import (
 
 var version = "0.1.0"
 
+var errInputRequired = errors.New("삭제 확인이 필요합니다: --yes를 사용하거나 TTY에서 실행하십시오")
+
 type aiAnalyzer interface {
 	Analyze(ctx context.Context, results []scanner.ScanResult, prompt string) (*ai.AnalysisResult, error)
 }
@@ -27,17 +31,22 @@ type aiAnalyzer interface {
 // injected writers in tests (mirrors rich/wcli's writer injection).
 type app struct {
 	out        io.Writer
+	status     io.Writer
 	in         io.Reader
 	aiAnalyzer aiAnalyzer
 }
 
 func newApp(out io.Writer, in io.Reader) *app {
-	return &app{out: out, in: in}
+	return &app{out: out, status: out, in: in}
 }
 
 func main() {
 	a := newApp(os.Stdout, os.Stdin)
+	a.status = os.Stderr
 	if err := a.rootCommand().Execute(os.Args[1:]); err != nil {
+		if errors.Is(err, errInputRequired) {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
 }
@@ -47,6 +56,11 @@ func main() {
 func (a *app) rootCommand() *wcli.Command {
 	var dryRun bool
 	var skipList string
+	var autoYes bool
+	var noInput bool
+	var quiet bool
+	var noColor bool
+	var format string
 
 	cmd := &wcli.Command{
 		Use:     "pcc",
@@ -54,11 +68,30 @@ func (a *app) rootCommand() *wcli.Command {
 		Long:    "macOS / Windows / Linux에서 캐시 및 임시 파일을 정리해 디스크 공간을 확보합니다.",
 		Version: version,
 		Run: func(ctx *wcli.Context) error {
-			return a.clean(dryRun, skipList)
+			if format == "json" {
+				return a.cleanJSON(dryRun, skipList, autoYes, noInput)
+			}
+			if format != "" && format != "plain" {
+				return fmt.Errorf("지원하지 않는 출력 형식: %q", format)
+			}
+			if quiet {
+				a.status = io.Discard
+			}
+			previousNoColor := rich.NoColor
+			if noColor {
+				rich.NoColor = true
+			}
+			defer func() { rich.NoColor = previousNoColor }()
+			return a.clean(dryRun, skipList, autoYes, noInput)
 		},
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", "", false, "실제 삭제 없이 분석만 실행")
+	cmd.Flags().BoolVar(&autoYes, "yes", "y", false, "확인 질문 없이 즉시 정리")
+	cmd.Flags().BoolVar(&noInput, "no-input", "", false, "대화형 입력을 사용하지 않음")
+	cmd.Flags().BoolVar(&quiet, "quiet", "q", false, "진행 메시지를 줄임")
+	cmd.Flags().BoolVar(&noColor, "no-color", "", false, "색상 출력을 끔")
+	cmd.Flags().StringVar(&format, "format", "", "plain", "출력 형식 (plain, json)")
 	cmd.Flags().StringVar(&skipList, "skip", "", "", "건너뛸 항목 (쉼표 구분, 예: gradle,pip,docker)")
 
 	cmd.AddCommand(a.aiCommand())
@@ -67,14 +100,14 @@ func (a *app) rootCommand() *wcli.Command {
 }
 
 // clean runs the full scan → review → confirm → clean pipeline.
-func (a *app) clean(dryRun bool, skipList string) error {
-	rich.Fprintln(a.out, "[bold][cyan]PC Cleaner v%s — %s[/cyan][/bold]", version, runtime.GOOS)
+func (a *app) clean(dryRun bool, skipList string, autoYes, noInput bool) error {
+	rich.Fprintln(a.status, "[bold][cyan]PC Cleaner v%s — %s[/cyan][/bold]", version, runtime.GOOS)
 
 	items := scanner.GetItems()
 	items = filterItems(items, skipList)
 
-	rich.Fprintln(a.out, "  [cyan]ℹ[/cyan] 총 %d개 항목 스캔 중...", len(items))
-	fmt.Fprintln(a.out)
+	rich.Fprintln(a.status, "  [cyan]ℹ[/cyan] 총 %d개 항목 스캔 중...", len(items))
+	fmt.Fprintln(a.status)
 
 	results := scanner.Scan(items)
 	a.printScanTable(results)
@@ -98,7 +131,7 @@ func (a *app) clean(dryRun bool, skipList string) error {
 		}
 		rich.Fprintln(a.out, "  [yellow]⚠ [DRY-RUN] 정리 가능 용량: [bold]%s[/bold][/yellow]",
 			ui.FormatBytes(totalSize))
-		cleaner.Clean(cleanable, true)
+		cleaner.CleanTo(a.out, cleanable, true)
 		return nil
 	}
 
@@ -111,18 +144,23 @@ func (a *app) clean(dryRun bool, skipList string) error {
 	}
 	rich.Fprintln(a.out, "  [bold]정리 가능 용량: %s[/bold]", ui.FormatBytes(totalSize))
 
-	ok, err := rich.FConfirm(a.out, a.in, "삭제를 진행하시겠습니까?", false)
-	if err != nil {
-		return err
+	if !autoYes && (noInput || !isInteractive(a.in)) {
+		return errInputRequired
 	}
-	if !ok {
-		fmt.Fprintln(a.out)
-		rich.Fprintln(a.out, "  [yellow]⚠ 취소되었습니다.[/yellow]")
-		return nil
+	if !autoYes {
+		ok, err := rich.FConfirm(a.status, a.in, "삭제를 진행하시겠습니까?", false)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Fprintln(a.out)
+			rich.Fprintln(a.out, "  [yellow]⚠ 취소되었습니다.[/yellow]")
+			return nil
+		}
 	}
 
 	fmt.Fprintln(a.out)
-	cleaned := cleaner.Clean(cleanable, false)
+	cleaned := cleaner.CleanTo(a.out, cleanable, false)
 	a.printReport(cleaned)
 	return nil
 }
@@ -135,6 +173,73 @@ func (a *app) printNoCleanable() {
 		)
 	}
 	rich.Fprintln(a.out, "  [green]✓[/green] 정리할 항목이 없습니다.")
+}
+
+type jsonScanItem struct {
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Exists   bool   `json:"exists"`
+	Size     int64  `json:"size"`
+	Error    string `json:"error,omitempty"`
+}
+
+type jsonReport struct {
+	Version        string           `json:"version"`
+	DryRun         bool             `json:"dry_run"`
+	Items          []jsonScanItem   `json:"items"`
+	CleanableCount int              `json:"cleanable_count"`
+	TotalSize      int64            `json:"total_size"`
+	SuccessCount   int              `json:"success_count"`
+	FailedCount    int              `json:"failed_count"`
+	Cleaned        []cleaner.Result `json:"cleaned,omitempty"`
+}
+
+func renderJSON(out io.Writer, results []scanner.ScanResult, cleaned []cleaner.Result, dryRun bool) error {
+	items := make([]jsonScanItem, 0, len(results))
+	for _, result := range results {
+		item := jsonScanItem{Name: result.Item.Name, Category: result.Item.Category, Exists: result.Exists, Size: result.Size}
+		if result.Error != nil {
+			item.Error = result.Error.Error()
+		}
+		items = append(items, item)
+	}
+	var totalSize int64
+	for _, result := range results {
+		if result.Exists && result.Error == nil && !result.NeedsAdmin && result.Size > 0 {
+			totalSize += result.Size
+		}
+	}
+	var successCount, failedCount int
+	for _, result := range cleaned {
+		if result.Success {
+			successCount++
+		} else {
+			failedCount++
+		}
+	}
+	return json.NewEncoder(out).Encode(jsonReport{
+		Version: version, DryRun: dryRun, Items: items,
+		CleanableCount: len(cleanableResults(results)), TotalSize: totalSize,
+		SuccessCount: successCount, FailedCount: failedCount, Cleaned: cleaned,
+	})
+}
+
+func cleanableResults(results []scanner.ScanResult) []scanner.ScanResult {
+	return filterCleanable(results)
+}
+
+func (a *app) cleanJSON(dryRun bool, skipList string, autoYes, noInput bool) error {
+	items := filterItems(scanner.GetItems(), skipList)
+	results := scanner.Scan(items)
+	cleanable := filterCleanable(results)
+	if !dryRun && !autoYes {
+		return errInputRequired
+	}
+	var cleaned []cleaner.Result
+	if autoYes && !dryRun {
+		cleaned = cleaner.CleanTo(io.Discard, cleanable, false)
+	}
+	return renderJSON(a.out, results, cleaned, dryRun)
 }
 
 // filterItems removes items whose name contains any of the skip keywords.
@@ -277,6 +382,9 @@ func (a *app) aiCommand() *wcli.Command {
 		model    string
 		endpoint string
 		provider string
+		noInput  bool
+		quiet    bool
+		noColor  bool
 	)
 
 	cmd := &wcli.Command{
@@ -284,13 +392,24 @@ func (a *app) aiCommand() *wcli.Command {
 		Short: "LLM 에이전트가 캐시를 분석하고 정리할 항목을 추천합니다",
 		Long:  "LLM(기본: Ollama)을 활용하여 캐시 항목들의 위험도를 평가하고 최적의 정리 계획을 제시합니다.",
 		Run: func(ctx *wcli.Context) error {
+			if quiet {
+				a.status = io.Discard
+			}
+			previousNoColor := rich.NoColor
+			if noColor {
+				rich.NoColor = true
+			}
+			defer func() { rich.NoColor = previousNoColor }()
 			userPrompt := strings.Join(ctx.Args, " ")
-			return a.cleanAI(dryRun, autoYes, skipList, provider, endpoint, model, userPrompt)
+			return a.cleanAI(dryRun, autoYes, skipList, provider, endpoint, model, userPrompt, noInput)
 		},
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", "", false, "실제 삭제 없이 분석 및 추천만 실행")
 	cmd.Flags().BoolVar(&autoYes, "yes", "y", false, "확인 질문 없이 AI 추천 항목 즉시 정리")
+	cmd.Flags().BoolVar(&noInput, "no-input", "", false, "대화형 입력을 사용하지 않음")
+	cmd.Flags().BoolVar(&quiet, "quiet", "q", false, "진행 메시지를 줄임")
+	cmd.Flags().BoolVar(&noColor, "no-color", "", false, "색상 출력을 끔")
 	cmd.Flags().StringVar(&skipList, "skip", "", "", "건너뛸 항목 (쉼표 구분)")
 	cmd.Flags().StringVar(&model, "model", "", getEnvOrDefault("PCC_AI_MODEL", ai.DefaultModel), "사용할 AI 모델")
 	cmd.Flags().StringVar(&endpoint, "endpoint", "", getEnvOrDefault("PCC_AI_ENDPOINT", ai.DefaultBaseURL), "LLM API 엔드포인트 URL")
@@ -300,16 +419,16 @@ func (a *app) aiCommand() *wcli.Command {
 }
 
 // cleanAI executes the AI-assisted scan → analyze → confirm → clean pipeline.
-func (a *app) cleanAI(dryRun, autoYes bool, skipList, provider, endpoint, model, prompt string) error {
-	rich.Fprintln(a.out, "[bold][cyan]PC Cleaner AI — AI 디스크 분석 및 스마트 정리[/cyan][/bold]")
+func (a *app) cleanAI(dryRun, autoYes bool, skipList, provider, endpoint, model, prompt string, noInput bool) error {
+	rich.Fprintln(a.status, "[bold][cyan]PC Cleaner AI — AI 디스크 분석 및 스마트 정리[/cyan][/bold]")
 	if prompt != "" {
-		rich.Fprintln(a.out, "  [dim]지시사항: %s[/dim]", prompt)
+		rich.Fprintln(a.status, "  [dim]지시사항: %s[/dim]", prompt)
 	}
 
 	items := scanner.GetItems()
 	items = filterItems(items, skipList)
 
-	rich.Fprintln(a.out, "  [cyan]ℹ[/cyan] 총 %d개 항목 스캔 중...", len(items))
+	rich.Fprintln(a.status, "  [cyan]ℹ[/cyan] 총 %d개 항목 스캔 중...", len(items))
 	scanResults := scanner.Scan(items)
 
 	cleanable := filterCleanable(scanResults)
@@ -333,12 +452,12 @@ func (a *app) cleanAI(dryRun, autoYes bool, skipList, provider, endpoint, model,
 		analyzer = ai.NewAnalyzer(client, effectiveModel)
 	}
 
-	rich.Fprintln(a.out, "  [cyan]ℹ[/cyan] AI 모델(%s)로 캐시 분석 중...", model)
+	rich.Fprintln(a.status, "  [cyan]ℹ[/cyan] AI 모델(%s)로 캐시 분석 중...", model)
 	analysis, err := analyzer.Analyze(context.Background(), cleanable, prompt)
 	if err != nil {
 		if strings.Contains(err.Error(), "connection refused") && provider == string(ai.ProviderOllama) {
-			rich.Fprintln(a.out, "  [red]✗ Ollama 서버에 연결할 수 없습니다 (%s).[/red]", endpoint)
-			rich.Fprintln(a.out, "  [yellow]ℹ 'ollama serve'가 실행 중인지 확인하거나, --endpoint 옵션을 확인하십시오.[/yellow]")
+			rich.Fprintln(a.status, "  [red]✗ Ollama 서버에 연결할 수 없습니다 (%s).[/red]", endpoint)
+			rich.Fprintln(a.status, "  [yellow]ℹ 'ollama serve'가 실행 중인지 확인하거나, --endpoint 옵션을 확인하십시오.[/yellow]")
 			return err
 		}
 		return fmt.Errorf("AI 분석 실패: %w", err)
@@ -369,7 +488,7 @@ func (a *app) cleanAI(dryRun, autoYes bool, skipList, provider, endpoint, model,
 		}
 		rich.Fprintln(a.out, "  [yellow]⚠ [DRY-RUN] 정리 권장 용량: [bold]%s[/bold][/yellow]",
 			ui.FormatBytes(totalSize))
-		cleaner.Clean(recommendedToClean, true)
+		cleaner.CleanTo(a.out, recommendedToClean, true)
 		return nil
 	}
 
@@ -383,7 +502,10 @@ func (a *app) cleanAI(dryRun, autoYes bool, skipList, provider, endpoint, model,
 	rich.Fprintln(a.out, "  [bold]정리 권장 용량: %s[/bold]", ui.FormatBytes(totalSize))
 
 	if !autoYes {
-		ok, err := rich.FConfirm(a.out, a.in, "AI가 추천한 항목들의 삭제를 진행하시겠습니까?", false)
+		if noInput || !isInteractive(a.in) {
+			return errInputRequired
+		}
+		ok, err := rich.FConfirm(a.status, a.in, "AI가 추천한 항목들의 삭제를 진행하시겠습니까?", false)
 		if err != nil {
 			return err
 		}
@@ -395,7 +517,7 @@ func (a *app) cleanAI(dryRun, autoYes bool, skipList, provider, endpoint, model,
 	}
 
 	fmt.Fprintln(a.out)
-	cleaned := cleaner.Clean(recommendedToClean, false)
+	cleaned := cleaner.CleanTo(a.out, recommendedToClean, false)
 	a.printReport(cleaned)
 	return nil
 }
@@ -432,6 +554,15 @@ func (a *app) printAIRecommendationTable(results []scanner.ScanResult, analysis 
 	}
 	t.Render(a.out)
 	fmt.Fprintln(a.out)
+}
+
+func isInteractive(in io.Reader) bool {
+	file, ok := in.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func getEnvOrDefault(key, fallback string) string {

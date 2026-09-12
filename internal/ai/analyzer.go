@@ -2,9 +2,12 @@ package ai
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	llm "github.com/wkqco33/LLM_client_go"
 	"github.com/wkqco33/pc_cleaner/internal/scanner"
@@ -16,6 +19,10 @@ type Analyzer struct {
 	model  string
 }
 
+const maxAttempts = 3
+
+var retrySleep = time.Sleep
+
 // NewAnalyzer creates a new Analyzer.
 func NewAnalyzer(client llm.Client, model string) *Analyzer {
 	return &Analyzer{
@@ -26,6 +33,9 @@ func NewAnalyzer(client llm.Client, model string) *Analyzer {
 
 // Analyze sends the scan results to the LLM and produces an AnalysisResult.
 func (a *Analyzer) Analyze(ctx context.Context, results []scanner.ScanResult, userInstruction string) (*AnalysisResult, error) {
+	requestID := newRequestID()
+	// Keep the request ID in context for provider adapters and include it in errors for correlation.
+	ctx = context.WithValue(ctx, requestIDKey{}, requestID)
 	// Filter to cleanable results for LLM context
 	cleanable := make([]scanner.ScanResult, 0, len(results))
 	validNames := make(map[string]scanner.ScanResult)
@@ -53,9 +63,19 @@ func (a *Analyzer) Analyze(ctx context.Context, results []scanner.ScanResult, us
 		},
 	}
 
-	resp, err := a.client.Complete(ctx, req)
+	var resp *llm.ChatResponse
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		resp, err = a.client.Complete(ctx, req)
+		if err == nil {
+			break
+		}
+		if attempt < maxAttempts {
+			retrySleep(time.Duration(1<<(attempt-1)) * 100 * time.Millisecond)
+		}
+	}
 	if err != nil {
-		return nil, fmt.Errorf("AI 모델 호출 실패: %w", err)
+		return nil, fmt.Errorf("AI 모델 호출 실패 (%d회 시도, request_id=%s): %w", maxAttempts, requestID, err)
 	}
 
 	if len(resp.Choices) == 0 {
@@ -81,6 +101,16 @@ func (a *Analyzer) Analyze(ctx context.Context, results []scanner.ScanResult, us
 	analysis.Recommendations = filteredRecs
 
 	return &analysis, nil
+}
+
+type requestIDKey struct{}
+
+func newRequestID() string {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return "unknown"
+	}
+	return hex.EncodeToString(bytes[:])
 }
 
 // FilterRecommended returns only ScanResults that the AI recommended for cleaning.

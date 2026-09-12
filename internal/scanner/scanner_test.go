@@ -66,6 +66,18 @@ func TestScanItem_NotExist(t *testing.T) {
 }
 
 // TestScanItem_Command: TypeCommand 항목은 Exists=true, Size=-1
+func TestScanItem_CommandUnavailable(t *testing.T) {
+	item := scanner.CacheItem{
+		Name:    "없는 명령",
+		Command: []string{"pc-cleaner-command-that-does-not-exist"},
+		Type:    scanner.TypeCommand,
+	}
+	r := scanner.Scan([]scanner.CacheItem{item})[0]
+	if r.Exists || r.Error == nil {
+		t.Fatalf("설치되지 않은 명령은 정리 후보가 아니어야 합니다: %+v", r)
+	}
+}
+
 func TestScanItem_Command(t *testing.T) {
 	item := scanner.CacheItem{
 		Name:    "명령형 항목",

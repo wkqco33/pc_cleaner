@@ -2,7 +2,9 @@
 package scanner
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -89,17 +91,30 @@ func isAncestor(parent, child string) bool {
 
 // Scan calculates sizes for all items concurrently.
 func Scan(items []CacheItem) []ScanResult {
+	type indexedResult struct {
+		index  int
+		result ScanResult
+	}
+
 	results := make([]ScanResult, len(items))
+	updates := make(chan indexedResult, len(items))
 	var wg sync.WaitGroup
 
 	for i, item := range items {
 		wg.Add(1)
 		go func(idx int, ci CacheItem) {
 			defer wg.Done()
-			results[idx] = scanItem(ci)
+			updates <- indexedResult{index: idx, result: scanItem(ci)}
 		}(i, item)
 	}
-	wg.Wait()
+
+	go func() {
+		wg.Wait()
+		close(updates)
+	}()
+	for update := range updates {
+		results[update.index] = update.result
+	}
 	return results
 }
 
@@ -112,7 +127,15 @@ func scanItem(item CacheItem) ScanResult {
 
 	switch item.Type {
 	case TypeCommand:
-		// 명령형 항목은 존재 여부만 표시, 용량은 알 수 없음 (-1)
+		// 명령형 항목은 실행 파일이 설치된 경우에만 정리 후보로 표시한다.
+		if len(item.Command) == 0 {
+			res.Error = fmt.Errorf("명령어가 비어 있습니다")
+			return res
+		}
+		if _, err := exec.LookPath(item.Command[0]); err != nil {
+			res.Error = fmt.Errorf("명령어를 찾을 수 없습니다: %s", item.Command[0])
+			return res
+		}
 		res.Exists = true
 		res.Size = -1
 		return res

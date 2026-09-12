@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -313,6 +315,59 @@ func TestAICommand_NoCleanable(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "정리할 항목이 없습니다") {
 		t.Errorf("정리 항목 없음 메시지가 출력되어야 합니다: %q", out)
+	}
+}
+
+func TestRenderJSON_EmitsMachineReadableResult(t *testing.T) {
+	var buf bytes.Buffer
+	results := []scanner.ScanResult{{
+		Item:   scanner.CacheItem{Name: "테스트", Category: "시스템"},
+		Exists: true,
+		Size:   1024,
+	}}
+	if err := renderJSON(&buf, results, nil, true); err != nil {
+		t.Fatalf("JSON 출력 실패: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("유효한 JSON이어야 합니다: %v", err)
+	}
+	if got["dry_run"] != true {
+		t.Errorf("dry_run이 true여야 합니다: %#v", got["dry_run"])
+	}
+	items, ok := got["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("items가 한 개여야 합니다: %#v", got["items"])
+	}
+}
+
+func TestRootCommand_JSONDryRun(t *testing.T) {
+	var buf bytes.Buffer
+	a := newApp(&buf, strings.NewReader(""))
+	if err := a.rootCommand().Execute([]string{"--format", "json", "--dry-run"}); err != nil {
+		t.Fatalf("JSON dry-run 실행 실패: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("JSON 모드가 사람이 읽는 출력 없이 JSON을 반환해야 합니다: %v", err)
+	}
+}
+
+func TestClean_NonInteractiveRequiresExplicitConfirmation(t *testing.T) {
+	var buf bytes.Buffer
+	a := newApp(&buf, strings.NewReader(""))
+
+	err := a.clean(false, "", false, true)
+	if !errors.Is(err, errInputRequired) {
+		t.Fatalf("비대화형 입력에는 명시적 확인 오류가 필요합니다: %v", err)
+	}
+}
+
+func TestRootCommand_ProvidesAutomationFlags(t *testing.T) {
+	var buf bytes.Buffer
+	a := newApp(&buf, strings.NewReader(""))
+	if err := a.rootCommand().Execute([]string{"--dry-run", "--yes", "--no-input", "--quiet", "--no-color"}); err != nil {
+		t.Fatalf("자동화 플래그가 인식되어야 합니다: %v", err)
 	}
 }
 
